@@ -1,0 +1,11 @@
+# requirements.in
+
+torch
+pandas
+numpy
+scikit-learn
+scipy
+nltk
+networkx
+pyyaml
+pytorch

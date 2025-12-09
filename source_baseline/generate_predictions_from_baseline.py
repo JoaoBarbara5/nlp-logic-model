@@ -3,11 +3,12 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from ast import literal_eval
 from tqdm import tqdm
+from config import CONFIG
 
 def generate_predictions():
     # 1. Load the Test Data
     # We use literal_eval to parse the stringified list of answers (e.g., "['opt1', 'opt2']")
-    test_df = pd.read_csv("test.csv")
+    test_df = pd.read_csv(CONFIG['test_path'])
     test_df['answers'] = test_df['answers'].apply(literal_eval)
     
     print(f"Loaded {len(test_df)} test examples.")
