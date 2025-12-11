@@ -3,8 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pandas as pd
 import ast
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import TensorDataset, DataLoader, random_split
 from transformers import AutoTokenizer
+from tqdm import tqdm 
 
 class AttentionLayer(nn.Module):
     def __init__(self, hidden_dim):
@@ -131,72 +132,22 @@ class TextPipeline:
         
         return TensorDataset(tensor_ctx, tensor_hyp, tensor_lbl), self.tokenizer.vocab_size
 
-
-
-
-CSV_PATH = r"aml-2025-read-between-the-lines/train.csv" 
-BATCH_SIZE = 16 
-EMBED_DIM = 100
-HIDDEN_DIM = 100
-DROPOUT = 0.3
-LR = 0.001
-
-pipeline = TextPipeline()
-dataset, vocab_size = pipeline.prepare_dataset(CSV_PATH)
-
-train_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = ReasoningModel(vocab_size, EMBED_DIM, HIDDEN_DIM, DROPOUT).to(device)
-
-optimizer = torch.optim.Adadelta(model.parameters(), lr=1.0)
-criterion = nn.CrossEntropyLoss() 
-
-print(f"\nModel Created. Device: {device}")
-print(f"Input Batch Shape: [B, 4, Seq]")
-
-print("\n--- Testing One Training Step ---")
-
-ctx_batch, hyp_batch, label_batch = next(iter(train_loader))
-ctx_batch, hyp_batch, label_batch = ctx_batch.to(device), hyp_batch.to(device), label_batch.to(device)
-
-logits = model(ctx_batch, hyp_batch) 
-
-loss = criterion(logits, label_batch)
-
-optimizer.zero_grad()
-loss.backward()
-optimizer.step()
-
-print(f"Batch Loss: {loss.item():.4f}")
-
-
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, random_split
-from tqdm import tqdm # For progress bars
-
-# --- 1. SETUP & HYPERPARAMETERS ---
 CSV_PATH = r"aml-2025-read-between-the-lines/train.csv"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Paper Hyperparameters (Section 4.1)
-BATCH_SIZE = 16          # Paper used 10 
-LEARNING_RATE = 1.0      # Paper used 1.0 with Adadelta 
-L2_REG = 1e-5            # Paper used 10^-5 
-DROPOUT = 0.3            # Paper used 0.3 for embeddings [cite: 151]
-NUM_EPOCHS = 10          # Adjust based on convergence
+BATCH_SIZE = 16          
+LEARNING_RATE = 1.0      
+L2_REG = 1e-5            
+DROPOUT = 0.3            
+NUM_EPOCHS = 10          
 
-# Architecture Params
 EMBED_DIM = 100
 HIDDEN_DIM = 100
 
-# --- 2. PREPARE DATA ---
 print("Initializing Pipeline...")
-pipeline = TextPipeline() # Using the class we defined in the previous step
+pipeline = TextPipeline() 
 full_dataset, vocab_size = pipeline.prepare_dataset(CSV_PATH)
 
-# Split Training and Validation (Simulating the 800 val set from paper)
 val_size = 800 
 train_size = len(full_dataset) - val_size
 train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
@@ -206,7 +157,6 @@ val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
 print(f"Data Loaded: {len(train_dataset)} Training, {len(val_dataset)} Validation")
 
-# --- 3. INITIALIZE MODEL ---
 model = ReasoningModel(
     vocab_size=vocab_size, 
     embed_dim=EMBED_DIM, 
@@ -214,80 +164,62 @@ model = ReasoningModel(
     dropout=DROPOUT
 ).to(DEVICE)
 
-# Loss Function: Standard for Multiple Choice (0, 1, 2, 3)
 criterion = nn.CrossEntropyLoss()
 
-# Optimizer: Adadelta as per paper
 optimizer = torch.optim.Adadelta(
     model.parameters(), 
     lr=LEARNING_RATE, 
-    weight_decay=L2_REG # This implements the L2 Regularization
+    weight_decay=L2_REG 
 )
 
-# --- 4. HELPER FUNCTION: ACCURACY ---
 def calculate_accuracy(preds, labels):
-    # preds shape: [Batch, 4] -> Get index of highest score
     predicted_classes = torch.argmax(preds, dim=1)
     correct = (predicted_classes == labels).sum().item()
     return correct
 
-# --- 5. THE TRAINING LOOP ---
 print("\n--- Starting Training ---")
 
 for epoch in range(NUM_EPOCHS):
-    # ==========================
-    #      TRAINING PHASE
-    # ==========================
-    model.train() # Enable Dropout
+    
+    model.train()
     total_train_loss = 0
     train_correct = 0
     total_train_samples = 0
     
-    # Progress Bar
     progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS} [Train]")
     
     for ctx_batch, hyp_batch, label_batch in progress_bar:
-        # Move to GPU
         ctx_batch = ctx_batch.to(DEVICE)
         hyp_batch = hyp_batch.to(DEVICE)
         label_batch = label_batch.to(DEVICE)
         
-        # 1. Forward Pass
-        optimizer.zero_grad() # Clear previous gradients
-        logits = model(ctx_batch, hyp_batch) # Shape: [Batch, 4]
+        optimizer.zero_grad() 
+        logits = model(ctx_batch, hyp_batch) 
         
-        # 2. Calculate Loss
         loss = criterion(logits, label_batch)
         
-        # 3. Backward Pass
         loss.backward()
         
-        # Optional: Clip Gradients to prevent exploding gradients in LSTM
+        
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         
-        # 4. Update Weights
         optimizer.step()
         
-        # 5. Metrics
         total_train_loss += loss.item()
         train_correct += calculate_accuracy(logits, label_batch)
         total_train_samples += label_batch.size(0)
         
-        # Update progress bar
         progress_bar.set_postfix({'loss': loss.item()})
 
     avg_train_loss = total_train_loss / len(train_loader)
     train_acc = train_correct / total_train_samples
 
-    # ==========================
-    #     VALIDATION PHASE
-    # ==========================
-    model.eval() # Disable Dropout
+    model.eval()
     total_val_loss = 0
     val_correct = 0
     total_val_samples = 0
     
-    with torch.no_grad(): # No gradients needed for validation
+    with torch.no_grad():
         for ctx_batch, hyp_batch, label_batch in val_loader:
             ctx_batch = ctx_batch.to(DEVICE)
             hyp_batch = hyp_batch.to(DEVICE)
@@ -303,9 +235,6 @@ for epoch in range(NUM_EPOCHS):
     avg_val_loss = total_val_loss / len(val_loader)
     val_acc = val_correct / total_val_samples
 
-    # ==========================
-    #      EPOCH SUMMARY
-    # ==========================
     print(f"\nEpoch {epoch+1} Results:")
     print(f"   Train Loss: {avg_train_loss:.4f} | Train Acc: {train_acc*100:.2f}%")
     print(f"   Val Loss:   {avg_val_loss:.4f} | Val Acc:   {val_acc*100:.2f}%")
