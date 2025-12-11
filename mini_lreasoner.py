@@ -7,7 +7,9 @@ from typing import List, Optional
 
 import torch
 from torch.utils.data import Dataset, DataLoader
-from transformers import AutoTokenizer, BertConfig, BertModel, AdamW, get_linear_schedule_with_warmup
+from torch.optim import AdamW
+from transformers import AutoTokenizer, BertConfig, BertModel, get_linear_schedule_with_warmup 
+from sklearn.model_selection import StratifiedKFold
 
 
 @dataclass
@@ -313,15 +315,53 @@ def predict_on_test(model, test_loader, device, output_csv: str):
     print(f"Wrote predictions to {output_csv}")
 
 
+def predict_logits(model, dataloader, device):
+    """Return logits and qids for a dataloader (used for fold ensembling)."""
+    model.to(device)
+    model.eval()
+    all_qids = []
+    all_logits = []
+
+    with torch.no_grad():
+        for batch in dataloader:
+            logits, _ = model(
+                input_ids=batch["input_ids"].to(device),
+                attention_mask=batch["attention_mask"].to(device),
+                token_type_ids=batch["token_type_ids"].to(device),
+                labels=None,
+            )
+            all_qids.extend(batch["qid"])
+            all_logits.append(logits.cpu())
+
+    return torch.cat(all_logits, dim=0), all_qids
+
+
 def main():
     parser = argparse.ArgumentParser(description="Mini LReasoner for ReClor (simplified)")
-    parser.add_argument("--train_file", type=str, required=True, help="Path to ReClor/LReasoner train.json or CSV")
-    parser.add_argument("--dev_file", type=str, required=True, help="Path to dev/val.json or CSV")
-    parser.add_argument("--test_file", type=str, default=None, help="Optional test.json or CSV for submission")
+    default_train = "aml-2025-read-between-the-lines/train.csv"
+    default_test = "test.csv"
+    parser.add_argument(
+        "--train_file",
+        type=str,
+        default=default_train,
+        help=f"Path to training file (csv or json). Default: {default_train}",
+    )
+    parser.add_argument(
+        "--dev_file",
+        type=str,
+        default=None,
+        help="Optional dev/validation file. If omitted, K-fold CV is used.",
+    )
+    parser.add_argument(
+        "--test_file",
+        type=str,
+        default=default_test,
+        help=f"Optional test file for prediction. Default: {default_test}",
+    )
     parser.add_argument(
         "--file_format",
         type=str,
-        default="json",
+        default="csv",
         choices=["json", "csv"],
         help="Input file format (json for LReasoner reclor-data, csv for Kaggle-style).",
     )
@@ -345,37 +385,22 @@ def main():
     parser.add_argument("--grad_accum_steps", type=int, default=1)
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument("--output_dir", type=str, default="./mini_lreasoner_ckpt")
+    parser.add_argument("--num_folds", type=int, default=5, help="Number of folds for CV when dev_file is not provided")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for CV shuffling")
     args = parser.parse_args()
 
     tokenizer = AutoTokenizer.from_pretrained(args.backbone_name, use_fast=True)
 
     if args.file_format == "json":
         train_examples = load_reclor_json(args.train_file)
-        dev_examples = load_reclor_json(args.dev_file)
+        dev_examples = load_reclor_json(args.dev_file) if args.dev_file else None
         test_examples = load_reclor_json(args.test_file) if args.test_file else None
     else:
         train_examples = load_reclor_csv(args.train_file)
-        dev_examples = load_reclor_csv(args.dev_file)
+        dev_examples = load_reclor_csv(args.dev_file) if args.dev_file else None
         test_examples = load_reclor_csv(args.test_file) if args.test_file else None
 
-    train_dataset = ReclorDataset(train_examples, tokenizer, max_length=args.max_length)
-    dev_dataset = ReclorDataset(dev_examples, tokenizer, max_length=args.max_length)
     test_dataset = ReclorDataset(test_examples, tokenizer, max_length=args.max_length) if test_examples else None
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=4,
-        collate_fn=collate_fn,
-    )
-    dev_loader = DataLoader(
-        dev_dataset,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=4,
-        collate_fn=collate_fn,
-    )
     test_loader = (
         DataLoader(
             test_dataset,
@@ -389,27 +414,120 @@ def main():
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = MiniLReasoner(backbone_name=args.backbone_name, init_from_pretrained=args.init_from_pretrained)
 
-    best_dev_acc, best_ckpt_path = train(
-        model,
-        train_loader,
-        dev_loader,
-        device,
-        lr=args.lr,
-        weight_decay=args.weight_decay,
-        num_epochs=args.num_epochs,
-        warmup_ratio=args.warmup_ratio,
-        grad_accum_steps=args.grad_accum_steps,
-        max_grad_norm=args.max_grad_norm,
-        output_dir=args.output_dir,
-    )
+    if dev_examples is not None:
+        # Standard train/dev training when an explicit dev file is supplied.
+        train_dataset = ReclorDataset(train_examples, tokenizer, max_length=args.max_length)
+        dev_dataset = ReclorDataset(dev_examples, tokenizer, max_length=args.max_length)
 
-    # Reload best checkpoint for test-time prediction (if requested)
-    if best_ckpt_path and test_loader is not None:
-        ckpt = torch.load(best_ckpt_path, map_location=device)
-        model.load_state_dict(ckpt["model_state_dict"])
-        predict_on_test(model, test_loader, device, os.path.join(args.output_dir, "submission.csv"))
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=4,
+            collate_fn=collate_fn,
+        )
+        dev_loader = DataLoader(
+            dev_dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=4,
+            collate_fn=collate_fn,
+        )
+
+        model = MiniLReasoner(backbone_name=args.backbone_name, init_from_pretrained=args.init_from_pretrained)
+        best_dev_acc, best_ckpt_path = train(
+            model,
+            train_loader,
+            dev_loader,
+            device,
+            lr=args.lr,
+            weight_decay=args.weight_decay,
+            num_epochs=args.num_epochs,
+            warmup_ratio=args.warmup_ratio,
+            grad_accum_steps=args.grad_accum_steps,
+            max_grad_norm=args.max_grad_norm,
+            output_dir=args.output_dir,
+        )
+
+        # Reload best checkpoint for test-time prediction (if requested)
+        if best_ckpt_path and test_loader is not None:
+            ckpt = torch.load(best_ckpt_path, map_location=device)
+            model.load_state_dict(ckpt["model_state_dict"])
+            predict_on_test(model, test_loader, device, os.path.join(args.output_dir, "submission.csv"))
+    else:
+        # K-fold cross-validation when no explicit dev file is provided.
+        labels = [ex.label for ex in train_examples]
+        if any(label is None for label in labels):
+            raise ValueError("Training data must include labels for cross-validation.")
+
+        skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
+        fold_accs = []
+        test_logits_sum = None
+        cached_test_qids = None
+
+        for fold_id, (train_idx, dev_idx) in enumerate(skf.split(range(len(train_examples)), labels)):
+            print(f"\n===== Fold {fold_id + 1}/{args.num_folds} =====")
+            fold_train_examples = [train_examples[i] for i in train_idx]
+            fold_dev_examples = [train_examples[i] for i in dev_idx]
+
+            train_dataset = ReclorDataset(fold_train_examples, tokenizer, max_length=args.max_length)
+            dev_dataset = ReclorDataset(fold_dev_examples, tokenizer, max_length=args.max_length)
+
+            train_loader = DataLoader(
+                train_dataset,
+                batch_size=args.batch_size,
+                shuffle=True,
+                num_workers=4,
+                collate_fn=collate_fn,
+            )
+            dev_loader = DataLoader(
+                dev_dataset,
+                batch_size=args.batch_size,
+                shuffle=False,
+                num_workers=4,
+                collate_fn=collate_fn,
+            )
+
+            model = MiniLReasoner(backbone_name=args.backbone_name, init_from_pretrained=args.init_from_pretrained)
+            fold_output_dir = os.path.join(args.output_dir, f"fold_{fold_id}")
+            best_dev_acc, best_ckpt_path = train(
+                model,
+                train_loader,
+                dev_loader,
+                device,
+                lr=args.lr,
+                weight_decay=args.weight_decay,
+                num_epochs=args.num_epochs,
+                warmup_ratio=args.warmup_ratio,
+                grad_accum_steps=args.grad_accum_steps,
+                max_grad_norm=args.max_grad_norm,
+                output_dir=fold_output_dir,
+            )
+
+            fold_accs.append(best_dev_acc)
+
+            if best_ckpt_path and test_loader is not None:
+                ckpt = torch.load(best_ckpt_path, map_location=device)
+                model.load_state_dict(ckpt["model_state_dict"])
+                logits, qids = predict_logits(model, test_loader, device)
+                cached_test_qids = cached_test_qids or qids
+                test_logits_sum = logits if test_logits_sum is None else test_logits_sum + logits
+
+        if fold_accs:
+            mean_acc = sum(fold_accs) / len(fold_accs)
+            print(f"\nCV finished | mean_dev_acc={mean_acc:.4f} | per_fold={fold_accs}")
+
+        if test_loader is not None and test_logits_sum is not None:
+            import pandas as pd
+
+            avg_logits = test_logits_sum / len(fold_accs)
+            preds = avg_logits.argmax(dim=-1)
+            submission_path = os.path.join(args.output_dir, "submission_cv.csv")
+            os.makedirs(args.output_dir, exist_ok=True)
+            df = pd.DataFrame({"id": cached_test_qids, "label": preds.tolist()})
+            df.to_csv(submission_path, index=False)
+            print(f"Wrote CV-averaged predictions to {submission_path}")
 
 
 if __name__ == "__main__":
