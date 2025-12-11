@@ -135,7 +135,7 @@ class TextPipeline:
 CSV_PATH = r"aml-2025-read-between-the-lines/train.csv"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-BATCH_SIZE = 16          
+BATCH_SIZE = 32       
 LEARNING_RATE = 1.0      
 L2_REG = 1e-5            
 DROPOUT = 0.3            
@@ -246,3 +246,23 @@ for epoch in range(NUM_EPOCHS):
     print("-" * 30)
 
 print("Training Complete.")
+
+
+SAVE_PATH = "att_bilstm_model.pth"
+
+print(f"Saving model to {SAVE_PATH}...")
+
+checkpoint = {
+    'epoch': NUM_EPOCHS,
+    'model_state_dict': model.state_dict(),
+    'optimizer_state_dict': optimizer.state_dict(),
+    'config': {
+        'vocab_size': vocab_size,
+        'embed_dim': EMBED_DIM,
+        'hidden_dim': HIDDEN_DIM,
+        'dropout': DROPOUT
+    }
+}
+
+torch.save(checkpoint, SAVE_PATH)
+print("Model saved successfully.")
