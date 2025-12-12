@@ -1,4 +1,3 @@
-import json
 import argparse
 import os
 import ast
@@ -20,36 +19,6 @@ class ReclorExample:
     question: str
     options: List[str]
     label: Optional[int] = None
-
-
-def load_reclor_json(path: str) -> List[ReclorExample]:
-    """Load ReClor-style JSON (same schema as HF reclor + LReasoner reclor-data)."""
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    examples: List[ReclorExample] = []
-    for item in data:
-        # LReasoner / ReClor keys: context, question, answers, label, id_string
-        context = item["context"]
-        question = item["question"]
-        options = item.get("answers") or item.get("options")
-        if not options:
-            raise ValueError("Expected key 'answers' or 'options' in JSON.")
-
-        label = item.get("label")
-        # Different repos use "id", "id_string", or "idx"
-        qid = str(item.get("id_string", item.get("id", item.get("idx", len(examples)))))
-
-        examples.append(
-            ReclorExample(
-                qid=qid,
-                context=context,
-                question=question,
-                options=list(options),
-                label=label,
-            )
-        )
-    return examples
 
 
 def load_reclor_csv(path: str) -> List[ReclorExample]:
@@ -362,13 +331,6 @@ def main():
         help=f"Optional test file for prediction. Default: {default_test}",
     )
     parser.add_argument(
-        "--file_format",
-        type=str,
-        default="csv",
-        choices=["json", "csv"],
-        help="Input file format (json for LReasoner reclor-data, csv for Kaggle-style).",
-    )
-    parser.add_argument(
         "--backbone_name",
         type=str,
         default="bert-base-uncased",
@@ -395,14 +357,9 @@ def main():
 
     tokenizer = AutoTokenizer.from_pretrained(args.backbone_name, use_fast=True)
 
-    if args.file_format == "json":
-        train_examples = load_reclor_json(args.train_file)
-        dev_examples = load_reclor_json(args.dev_file) if args.dev_file else None
-        test_examples = load_reclor_json(args.test_file) if args.test_file else None
-    else:
-        train_examples = load_reclor_csv(args.train_file)
-        dev_examples = load_reclor_csv(args.dev_file) if args.dev_file else None
-        test_examples = load_reclor_csv(args.test_file) if args.test_file else None
+    train_examples = load_reclor_csv(args.train_file)
+    dev_examples = load_reclor_csv(args.dev_file) if args.dev_file else None
+    test_examples = load_reclor_csv(args.test_file) if args.test_file else None
 
     test_dataset = ReclorDataset(test_examples, tokenizer, max_length=args.max_length) if test_examples else None
     test_loader = (
