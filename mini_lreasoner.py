@@ -248,43 +248,46 @@ def train(
     best_dev_acc = 0.0
     best_ckpt_path = None
 
-    for epoch in range(num_epochs):
-        model.train()
-        running_loss = 0.0
+    try:
+        for epoch in range(num_epochs):
+            model.train()
+            running_loss = 0.0
 
-        for step, batch in enumerate(train_loader):
-            logits, loss = model(
-                input_ids=batch["input_ids"].to(device),
-                attention_mask=batch["attention_mask"].to(device),
-                token_type_ids=batch["token_type_ids"].to(device),
-                labels=batch["labels"].to(device),
-            )
-            loss = loss / grad_accum_steps
-            loss.backward()
-            running_loss += loss.item()
+            for step, batch in enumerate(train_loader):
+                logits, loss = model(
+                    input_ids=batch["input_ids"].to(device),
+                    attention_mask=batch["attention_mask"].to(device),
+                    token_type_ids=batch["token_type_ids"].to(device),
+                    labels=batch["labels"].to(device),
+                )
+                loss = loss / grad_accum_steps
+                loss.backward()
+                running_loss += loss.item()
 
-            if (step + 1) % grad_accum_steps == 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-                optimizer.step()
-                scheduler.step()
-                optimizer.zero_grad()
-                global_step += 1
+                if (step + 1) % grad_accum_steps == 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                    optimizer.step()
+                    scheduler.step()
+                    optimizer.zero_grad()
+                    global_step += 1
 
-        dev_acc, _, _ = evaluate(model, dev_loader, device)
-        print(f"Epoch {epoch+1}/{num_epochs} | train_loss={running_loss:.4f} | dev_acc={dev_acc:.4f}")
+            dev_acc, _, _ = evaluate(model, dev_loader, device)
+            print(f"Epoch {epoch+1}/{num_epochs} | train_loss={running_loss:.4f} | dev_acc={dev_acc:.4f}")
 
-        # Save best checkpoint
-        if dev_acc > best_dev_acc:
-            best_dev_acc = dev_acc
-            best_ckpt_path = os.path.join(output_dir, "best_model.pt")
-            torch.save(
-                {
-                    "model_state_dict": model.state_dict(),
-                    "config": model.config.to_dict(),
-                },
-                best_ckpt_path,
-            )
-            print(f"  -> New best dev_acc={best_dev_acc:.4f}, saving to {best_ckpt_path}")
+            # Save best checkpoint
+            if dev_acc > best_dev_acc:
+                best_dev_acc = dev_acc
+                best_ckpt_path = os.path.join(output_dir, "best_model.pt")
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "config": model.config.to_dict(),
+                    },
+                    best_ckpt_path,
+                )
+                print(f"  -> New best dev_acc={best_dev_acc:.4f}, saving to {best_ckpt_path}")
+    except KeyboardInterrupt:
+        print("Training interrupted by user; returning best checkpoint so far.")
 
     print(f"Training finished. Best dev_acc={best_dev_acc:.4f} ({best_ckpt_path})")
     return best_dev_acc, best_ckpt_path
@@ -387,6 +390,7 @@ def main():
     parser.add_argument("--output_dir", type=str, default="./mini_lreasoner_ckpt")
     parser.add_argument("--num_folds", type=int, default=5, help="Number of folds for CV when dev_file is not provided")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for CV shuffling")
+    parser.add_argument("--num_workers", type=int, default=0, help="DataLoader workers (set 0 on Windows to avoid hangs)")
     args = parser.parse_args()
 
     tokenizer = AutoTokenizer.from_pretrained(args.backbone_name, use_fast=True)
@@ -424,31 +428,35 @@ def main():
             train_dataset,
             batch_size=args.batch_size,
             shuffle=True,
-            num_workers=4,
+            num_workers=args.num_workers,
             collate_fn=collate_fn,
         )
         dev_loader = DataLoader(
             dev_dataset,
             batch_size=args.batch_size,
             shuffle=False,
-            num_workers=4,
+            num_workers=args.num_workers,
             collate_fn=collate_fn,
         )
 
         model = MiniLReasoner(backbone_name=args.backbone_name, init_from_pretrained=args.init_from_pretrained)
-        best_dev_acc, best_ckpt_path = train(
-            model,
-            train_loader,
-            dev_loader,
-            device,
-            lr=args.lr,
-            weight_decay=args.weight_decay,
-            num_epochs=args.num_epochs,
-            warmup_ratio=args.warmup_ratio,
-            grad_accum_steps=args.grad_accum_steps,
-            max_grad_norm=args.max_grad_norm,
-            output_dir=args.output_dir,
-        )
+        try:
+            best_dev_acc, best_ckpt_path = train(
+                model,
+                train_loader,
+                dev_loader,
+                device,
+                lr=args.lr,
+                weight_decay=args.weight_decay,
+                num_epochs=args.num_epochs,
+                warmup_ratio=args.warmup_ratio,
+                grad_accum_steps=args.grad_accum_steps,
+                max_grad_norm=args.max_grad_norm,
+                output_dir=args.output_dir,
+            )
+        except KeyboardInterrupt:
+            print("Training interrupted before completion; skipping further steps.")
+            best_ckpt_path = None
 
         # Reload best checkpoint for test-time prediction (if requested)
         if best_ckpt_path and test_loader is not None:
@@ -466,53 +474,56 @@ def main():
         test_logits_sum = None
         cached_test_qids = None
 
-        for fold_id, (train_idx, dev_idx) in enumerate(skf.split(range(len(train_examples)), labels)):
-            print(f"\n===== Fold {fold_id + 1}/{args.num_folds} =====")
-            fold_train_examples = [train_examples[i] for i in train_idx]
-            fold_dev_examples = [train_examples[i] for i in dev_idx]
+        try:
+            for fold_id, (train_idx, dev_idx) in enumerate(skf.split(range(len(train_examples)), labels)):
+                print(f"\n===== Fold {fold_id + 1}/{args.num_folds} =====")
+                fold_train_examples = [train_examples[i] for i in train_idx]
+                fold_dev_examples = [train_examples[i] for i in dev_idx]
 
-            train_dataset = ReclorDataset(fold_train_examples, tokenizer, max_length=args.max_length)
-            dev_dataset = ReclorDataset(fold_dev_examples, tokenizer, max_length=args.max_length)
+                train_dataset = ReclorDataset(fold_train_examples, tokenizer, max_length=args.max_length)
+                dev_dataset = ReclorDataset(fold_dev_examples, tokenizer, max_length=args.max_length)
 
-            train_loader = DataLoader(
-                train_dataset,
-                batch_size=args.batch_size,
-                shuffle=True,
-                num_workers=4,
-                collate_fn=collate_fn,
-            )
-            dev_loader = DataLoader(
-                dev_dataset,
-                batch_size=args.batch_size,
-                shuffle=False,
-                num_workers=4,
-                collate_fn=collate_fn,
-            )
+                train_loader = DataLoader(
+                    train_dataset,
+                    batch_size=args.batch_size,
+                    shuffle=True,
+                    num_workers=args.num_workers,
+                    collate_fn=collate_fn,
+                )
+                dev_loader = DataLoader(
+                    dev_dataset,
+                    batch_size=args.batch_size,
+                    shuffle=False,
+                    num_workers=args.num_workers,
+                    collate_fn=collate_fn,
+                )
 
-            model = MiniLReasoner(backbone_name=args.backbone_name, init_from_pretrained=args.init_from_pretrained)
-            fold_output_dir = os.path.join(args.output_dir, f"fold_{fold_id}")
-            best_dev_acc, best_ckpt_path = train(
-                model,
-                train_loader,
-                dev_loader,
-                device,
-                lr=args.lr,
-                weight_decay=args.weight_decay,
-                num_epochs=args.num_epochs,
-                warmup_ratio=args.warmup_ratio,
-                grad_accum_steps=args.grad_accum_steps,
-                max_grad_norm=args.max_grad_norm,
-                output_dir=fold_output_dir,
-            )
+                model = MiniLReasoner(backbone_name=args.backbone_name, init_from_pretrained=args.init_from_pretrained)
+                fold_output_dir = os.path.join(args.output_dir, f"fold_{fold_id}")
+                best_dev_acc, best_ckpt_path = train(
+                    model,
+                    train_loader,
+                    dev_loader,
+                    device,
+                    lr=args.lr,
+                    weight_decay=args.weight_decay,
+                    num_epochs=args.num_epochs,
+                    warmup_ratio=args.warmup_ratio,
+                    grad_accum_steps=args.grad_accum_steps,
+                    max_grad_norm=args.max_grad_norm,
+                    output_dir=fold_output_dir,
+                )
 
-            fold_accs.append(best_dev_acc)
+                fold_accs.append(best_dev_acc)
 
-            if best_ckpt_path and test_loader is not None:
-                ckpt = torch.load(best_ckpt_path, map_location=device)
-                model.load_state_dict(ckpt["model_state_dict"])
-                logits, qids = predict_logits(model, test_loader, device)
-                cached_test_qids = cached_test_qids or qids
-                test_logits_sum = logits if test_logits_sum is None else test_logits_sum + logits
+                if best_ckpt_path and test_loader is not None:
+                    ckpt = torch.load(best_ckpt_path, map_location=device)
+                    model.load_state_dict(ckpt["model_state_dict"])
+                    logits, qids = predict_logits(model, test_loader, device)
+                    cached_test_qids = cached_test_qids or qids
+                    test_logits_sum = logits if test_logits_sum is None else test_logits_sum + logits
+        except KeyboardInterrupt:
+            print("CV interrupted by user; stopping remaining folds.")
 
         if fold_accs:
             mean_acc = sum(fold_accs) / len(fold_accs)
