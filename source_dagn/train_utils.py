@@ -1,4 +1,3 @@
-# train_utils.py
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -12,6 +11,23 @@ from model import DAGNRelational
 from data_utils import LogicalReasoningDataset, collate_fn
 
 def train_cross_validation(train_df, vocab, device):
+    """Trains a DAGNRelational model using K-Fold cross-validation.
+
+    This function performs K-Fold cross-validation on the training data to evaluate
+    the model's performance and provide a more robust estimate of its generalization
+    capability. It trains a new model for each fold and reports the average accuracy.
+
+    Args:
+        train_df (pd.DataFrame): DataFrame containing the training data, including
+            features and labels.
+        vocab (object): A vocabulary object (e.g., an instance of `Vocab`) that
+            maps tokens to numerical indices.
+        device (torch.device): The device (e.g., 'cuda' or 'cpu') on which to
+            perform training and evaluation.
+
+    Returns:
+        float: The average validation accuracy across all folds.
+    """
     print(f"\n[Starting Cross-Validation] k={CONFIG['k_folds']}")
     kf = KFold(n_splits=CONFIG['k_folds'], shuffle=True, random_state=42)
     fold_accuracies = []
@@ -65,6 +81,21 @@ def train_cross_validation(train_df, vocab, device):
     return avg_acc
 
 def train_final_model(train_df, vocab, device):
+    """Trains the final DAGNRelational model on the entire training dataset.
+
+    After cross-validation, this function trains a single model using all available
+    training data. This model is then typically used for making predictions on
+    unseen test data.
+
+    Args:
+        train_df (pd.DataFrame): DataFrame containing the full training data.
+        vocab (object): A vocabulary object that maps tokens to numerical indices.
+        device (torch.device): The device (e.g., 'cuda' or 'cpu') on which to
+            perform training.
+
+    Returns:
+        torch.nn.Module: The trained DAGNRelational model.
+    """
     print("\n[Training Final Model on Full Dataset]")
     full_ds = LogicalReasoningDataset(train_df, vocab)
     full_loader = DataLoader(full_ds, batch_size=CONFIG['batch_size'], shuffle=True, collate_fn=collate_fn)
@@ -90,6 +121,23 @@ def train_final_model(train_df, vocab, device):
     return model
 
 def generate_submission(model, test_df, vocab, device):
+    """Generates a submission file with predictions for the test dataset.
+
+    This function takes a trained model, processes the test data, makes predictions,
+    and saves them to a CSV file named 'submission.csv' in the format required
+    for submission.
+
+    Args:
+        model (torch.nn.Module): The trained DAGNRelational model.
+        test_df (pd.DataFrame): DataFrame containing the test data, including
+            unique identifiers for each sample.
+        vocab (object): A vocabulary object that maps tokens to numerical indices.
+        device (torch.device): The device (e.g., 'cuda' or 'cpu') on which to
+            perform inference.
+
+    Returns:
+        None: The function saves the submission file directly to disk.
+    """
     print("\n[Generating Submission]")
     test_ds = LogicalReasoningDataset(test_df, vocab, is_test=True)
     test_loader = DataLoader(test_ds, batch_size=CONFIG['batch_size'], shuffle=False, collate_fn=collate_fn)
