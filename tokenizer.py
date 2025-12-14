@@ -62,7 +62,7 @@ class FastTextTokenizer:
         raw_sentences.extend(answers_list)
         
         return raw_sentences
-
+        
     def _tokenize_sentence(self, text):
         # 1. Lowercase
         text = text.lower()
