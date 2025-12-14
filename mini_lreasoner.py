@@ -96,20 +96,16 @@ class ReclorDataset(Dataset):
 class MiniLReasoner(torch.nn.Module):
     """
     A very simple LReasoner-style model:
-    - backbone: BERT-style encoder (randomly initialized by default)
+    - backbone: BERT-style encoder (always randomly initialized)
     - head: linear layer on [CLS] for each option
     - trained only with multiple-choice cross-entropy (no contrastive loss, no symbolic module)
     """
 
-    def __init__(self, backbone_name: str = "bert-base-uncased", init_from_pretrained: bool = False):
+    def __init__(self, backbone_name: str = "bert-base-uncased"):
         super().__init__()
-        if init_from_pretrained:
-            self.config = BertConfig.from_pretrained(backbone_name)
-            self.bert = BertModel.from_pretrained(backbone_name, config=self.config)
-        else:
-            # Use the config of a standard BERT but *randomly initialize* weights
-            self.config = BertConfig.from_pretrained(backbone_name)
-            self.bert = BertModel(self.config)
+        # Always initialize a fresh BERT using the requested config (no pretrained weights)
+        self.config = BertConfig.from_pretrained(backbone_name)
+        self.bert = BertModel(self.config)
 
         self.dropout = torch.nn.Dropout(self.config.hidden_dropout_prob)
         self.classifier = torch.nn.Linear(self.config.hidden_size, 1)  # score per option
@@ -336,11 +332,6 @@ def main():
         default="bert-base-uncased",
         help="Backbone name (used for tokenizer + config, like in LReasoner).",
     )
-    parser.add_argument(
-        "--init_from_pretrained",
-        action="store_true",
-        help="If set, initialize BERT weights from a pretrained checkpoint instead of random.",
-    )
     parser.add_argument("--max_length", type=int, default=256)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--num_epochs", type=int, default=8)
@@ -396,7 +387,7 @@ def main():
             collate_fn=collate_fn,
         )
 
-        model = MiniLReasoner(backbone_name=args.backbone_name, init_from_pretrained=args.init_from_pretrained)
+        model = MiniLReasoner(backbone_name=args.backbone_name)
         try:
             best_dev_acc, best_ckpt_path = train(
                 model,
@@ -455,7 +446,7 @@ def main():
                     collate_fn=collate_fn,
                 )
 
-                model = MiniLReasoner(backbone_name=args.backbone_name, init_from_pretrained=args.init_from_pretrained)
+                model = MiniLReasoner(backbone_name=args.backbone_name)
                 fold_output_dir = os.path.join(args.output_dir, f"fold_{fold_id}")
                 best_dev_acc, best_ckpt_path = train(
                     model,
