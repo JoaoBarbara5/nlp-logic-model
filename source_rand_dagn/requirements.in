@@ -1,0 +1,11 @@
+torch
+numpy
+transformers
+scikit-learn
+pandas
+tqdm
+textblob
+gensim
+nltk
+jsonlines
+filelock
