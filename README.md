@@ -1,5 +1,7 @@
 # Read Between the Lines
 
+![Project Poster](Submission_Combined_Malak_Miguel_Joao.jpg)
+
 Authors: Malak Khan, Miguel Betrán Menz, João Fernandes Bárbara 
 
 ## Overview
@@ -12,6 +14,7 @@ The project investigates whether simpler architectures or those trained from scr
 
 The project is organized by model architecture. All necessary data is included in the assignment_data directory.
 
+```
 ├── assignment_data/          # Contains train.csv and test.csv
 ├── source_baseline/          # Code for Baseline Method: MALAK ADD DESCRIPTION
 ├── source_minilreasoner/     # Code for Method A: Transformer-based MiniLReasoner
@@ -20,6 +23,7 @@ The project is organized by model architecture. All necessary data is included i
 ├── requirements.txt          # Python dependencies
 ├── LICENSE                   # MIT License
 └── README.md                 # Project documentation
+```
 
 ## Installation
 
@@ -38,11 +42,7 @@ Ensure you have Python installed, then run:
 
 ## Running the Models
 
-Each model is self-contained in its respective folder. No extra downloads are required. The submission files are generated in the model's folder.
-
-## Project Presentation
-
-![Project Poster](Submission_Combined_Malak_Miguel_Joao.jpg)
+Each model is self-contained in its respective folder. No extra downloads are required. The submission files are generated in the model's folder by running each file.
 
 ## NOTE:
 
