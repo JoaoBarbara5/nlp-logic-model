@@ -11,6 +11,7 @@ import itertools
 import nltk
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
+import os
 
 def download_nltk_resources():
     resources = ['punkt', 'wordnet', 'omw-1.4', 'punkt_tab']
@@ -292,11 +293,17 @@ class MCQA_TestDataset(Dataset):
     def __len__(self): return len(self.data)
 
 if __name__ == "__main__":
-    pipeline = GridSearchPipeline('aml-2025-read-between-the-lines/train.csv', PARAM_GRID)
+    
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    csv_path = os.path.join(script_dir, '..', 'assignment_data', 'train.csv')
+    pipeline = GridSearchPipeline(csv_path, PARAM_GRID)
     pipeline.run()
-
+    
     def predict_submission(pipeline, test_csv_path, model_path='best_model.pth', output_file='submission.csv'):
         print(f"\n--- Generating Predictions for {test_csv_path} ---")
+        
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        csv_path = os.path.join(script_dir, output_file)
         
         if not hasattr(pipeline, 'best_params') or pipeline.best_params is None:
             print("Error: pipeline.best_params not found. Please modify GridSearchPipeline.run() to store it.")
@@ -340,4 +347,7 @@ if __name__ == "__main__":
         submission.to_csv(output_file, index=False)
         print(f"Predictions saved to '{output_file}'")
     
-    predict_submission(pipeline, 'aml-2025-read-between-the-lines/test.csv')
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    csv_path = os.path.join(script_dir, '..', 'assignment_data', 'test.csv')
+    predict_submission(pipeline, csv_path)

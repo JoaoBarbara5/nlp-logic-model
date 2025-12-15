@@ -10,6 +10,7 @@ import nltk
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
 from gensim.models import Word2Vec
+import os
 
 CONFIG = {
     'embedding_dim': 100,      
@@ -285,11 +286,17 @@ class FullTrainPipeline:
                 predictions.extend(preds.cpu().numpy())
                 
         submission = pd.DataFrame({'id': ids, 'prediction': predictions})
-        submission.to_csv('submission.csv', index=False)
+        
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        csv_path = os.path.join(script_dir, 'submission.csv')
+        submission.to_csv(csv_path, index=False)
         print("   Predictions saved to 'submission.csv'")
 
 if __name__ == "__main__":
-    pipeline = FullTrainPipeline('train.csv', 'test.csv', CONFIG)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    test_csv_path = os.path.join(script_dir, '..', 'assignment_data', 'test.csv')
+    train_csv_path = os.path.join(script_dir, '..', 'assignment_data', 'train.csv')
+    pipeline = FullTrainPipeline(train_csv_path, test_csv_path, CONFIG)
     
     pipeline.prepare_resources() 
     pipeline.train()             

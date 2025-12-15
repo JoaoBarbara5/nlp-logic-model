@@ -198,8 +198,10 @@ def train(
     warmup_ratio: float = 0.1,
     grad_accum_steps: int = 1,
     max_grad_norm: float = 1.0,
-    output_dir: str = "./mini_lreasoner_ckpt",
+    output_dir: str = "mini_lreasoner_ckpt",
 ):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    default_ckpt = os.path.join(script_dir, output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
     t_total = num_epochs * len(train_loader) // grad_accum_steps
@@ -306,8 +308,9 @@ def predict_logits(model, dataloader, device):
 
 def main():
     parser = argparse.ArgumentParser(description="Mini LReasoner for ReClor (simplified)")
-    default_train = "aml-2025-read-between-the-lines/train.csv"
-    default_test = "test.csv"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    default_test = os.path.join(script_dir, '..', 'assignment_data', 'test.csv')
+    default_train = os.path.join(script_dir, '..', 'assignment_data', 'train.csv')
     parser.add_argument(
         "--train_file",
         type=str,
@@ -340,7 +343,8 @@ def main():
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--grad_accum_steps", type=int, default=1)
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
-    parser.add_argument("--output_dir", type=str, default="./mini_lreasoner_ckpt")
+    default_ckpt = os.path.join(script_dir, 'mini_lreasoner_ckpt')
+    parser.add_argument("--output_dir", type=str, default=default_ckpt)
     parser.add_argument("--num_folds", type=int, default=5, help="Number of folds for CV when dev_file is not provided")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for CV shuffling")
     parser.add_argument("--num_workers", type=int, default=0, help="DataLoader workers (set 0 on Windows to avoid hangs)")
@@ -410,7 +414,9 @@ def main():
         if best_ckpt_path and test_loader is not None:
             ckpt = torch.load(best_ckpt_path, map_location=device)
             model.load_state_dict(ckpt["model_state_dict"])
-            predict_on_test(model, test_loader, device, os.path.join(args.output_dir, "submission.csv"))
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            csv_path = os.path.join(script_dir, 'submission.csv')
+            predict_on_test(model, test_loader, device, csv_path)
     else:
         # K-fold cross-validation when no explicit dev file is provided.
         labels = [ex.label for ex in train_examples]
@@ -482,7 +488,8 @@ def main():
 
             avg_logits = test_logits_sum / len(fold_accs)
             preds = avg_logits.argmax(dim=-1)
-            submission_path = os.path.join(args.output_dir, "submission_cv.csv")
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            submission_path = os.path.join(script_dir, 'submission.csv')
             os.makedirs(args.output_dir, exist_ok=True)
             df = pd.DataFrame({"id": cached_test_qids, "label": preds.tolist()})
             df.to_csv(submission_path, index=False)
