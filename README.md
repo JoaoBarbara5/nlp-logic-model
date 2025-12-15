@@ -36,49 +36,15 @@ Ensure you have Python installed, then run:
 
 ```pip install -r requirements.txt```
 
+## Running the Models
 
-How to Run the Models
+Each model is self-contained in its respective folder. No extra downloads are required. The submission files are generated in the model's folder.
 
-Each model is self-contained in its respective folder. No extra downloads are required.
+## Project Presentation
 
-1. MiniLReasoner (Method A)
-A Transformer-based model (BERT encoder) that pools the [CLS] token for each option and scores it using a linear head.
+![Project Poster](Submission_Combined_Malak_Miguel_Joao.jpg)
 
-
-To Run:
-
-Bash
-
-cd source_minilreasoner
-python mini_lreasoner.py
-This will train the model and generate a submission file in the assignment_data folder.
-
-2. Bi-LSTM with Attention (Method C)
-A Bidirectional LSTM that uses an attention mechanism to pool hidden states into a context vector for classification.
-
-
-To Run:
-
-Bash
-
-cd source_bi_lstm
-python bi-lstm.py
-Note: This script performs a Grid Search by default before training the final model.
-
-3. Rand-DAGN (Method B)
-A Discourse-Aware Graph Network with randomly initialized embeddings, using punctuation and delimiters to build the graph structure.
-
-
-To Run:
-
-Bash
-
-cd source_baseline
-python main.py
-(Note: Replace main.py with the actual script name if different, e.g., run_dagn.py)
-
-
-NOTE:
+## NOTE:
 
 For the DAGN Architecture, ONLY the RandomEmbedding module/class is written by us. The rest of the model architecture is directly cited from:
 
