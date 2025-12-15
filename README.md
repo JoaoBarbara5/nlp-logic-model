@@ -16,7 +16,7 @@ The project is organized by model architecture. All necessary data is included i
 
 ```
 ├── assignment_data/          # Contains train.csv and test.csv
-├── source_baseline/          # Code for Baseline Method: MALAK ADD DESCRIPTION
+├── source_baseline/          # Code for Baseline Method: RoBERTa-Large fine-tuned on ReClor
 ├── source_minilreasoner/     # Code for Method A: Transformer-based MiniLReasoner
 ├── source_rand_dagn/         # Code for Method B: Rand-DAGN (Graph Network)
 ├── source_bi_lstm/           # Code for Method C and C*: Bi-LSTM with Attention
